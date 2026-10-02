@@ -24,7 +24,7 @@ import subprocess
 
 import numpy as np
 
-from . import audio, fotos, mp4
+from . import audio, conversao, fotos, mp4
 from .fotos import EXT_FOTO
 from .ntfs import EXT_VIDEO
 
@@ -97,8 +97,27 @@ class Recuperador:
     # ------------------------------------------------------------------ infraestrutura
     def _auditar(self, evento, **kw):
         kw.update(ts=datetime.datetime.now().isoformat(timespec="seconds"), evento=evento)
+        if self.audit is None or self.audit.closed:        # conversões depois da recuperação
+            self.audit = open(os.path.join(self.saida, "auditoria.jsonl"), "a", encoding="utf-8")
         self.audit.write(json.dumps(kw, ensure_ascii=False) + "\n")
         self.audit.flush()
+
+    # ------------------------------------------------------------------ conversão
+    def converter_arquivo(self, caminho, chave, largura=3840):
+        """Converte um arquivo recuperado; o resultado entra no relatório como derivado."""
+        origem = next((it for it in self.itens if it["arquivo"] == caminho), None)
+        sha_orig = sha256(caminho)
+        r = conversao.converter(caminho, chave, os.path.join(self.saida, "convertidos"),
+                                self.ffmpeg, self.ffprobe, largura=largura)
+        info = self._ffprobe(r["arquivo"]) if r["arquivo"].endswith(".mp4") else {}
+        if chave == "jpg" and origem:
+            info = {"largura": origem.get("largura"), "altura": origem.get("altura"), "duracao": None}
+        self._registrar(dict(origem="convertido", nome_original=origem.get("nome_original") if origem else None,
+                             arquivo=r["arquivo"], estado=r["observacao"], faixas=[],
+                             derivado_de=caminho, derivado_de_sha256=sha_orig,
+                             recodificado=r["recodifica"], comando=r["comando"], **info))
+        self._relatorio()
+        return self.itens[-1]
 
     def _pasta(self, nome, raiz="videos"):
         p = os.path.join(self.saida, raiz, nome)
@@ -712,7 +731,12 @@ class Recuperador:
                        "     origem: %s   estado: %s" % (it["origem"], it["estado"]),
                        "     duração: %s   %sx%s   %s bytes" % (mmss(it.get("duracao")), it.get("largura"),
                                                              it.get("altura"), it["tamanho"]),
-                       "     SHA-256: %s" % it["sha256"], ""]
+                       "     SHA-256: %s" % it["sha256"]]
+            if it.get("derivado_de"):
+                linhas += ["     derivado de: %s (SHA-256 %s)" % (os.path.relpath(it["derivado_de"], self.saida),
+                                                               it["derivado_de_sha256"]),
+                           "     comando: %s" % it["comando"]]
+            linhas.append("")
         if self.nao_recuperados:
             linhas += ["APAGADOS LOCALIZADOS E NÃO RECUPERADOS (%d)" % len(self.nao_recuperados)]
             for x in self.nao_recuperados:

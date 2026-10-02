@@ -18,6 +18,12 @@ def main():
     ap.add_argument("--saida", help="pasta de saída dos vídeos recuperados e do relatório")
     ap.add_argument("--iniciar", action="store_true", help="começa a varredura ao abrir")
     ap.add_argument("--sem-interface", action="store_true", help="executa no terminal, sem janela")
+    ap.add_argument("--converter", default="",
+                    help="ao fim, converte o que for compatível: mp4, jpg, lado_a_lado, equiretangular "
+                         "(separados por vírgula). mp4 e jpg não recodificam; os outros geram cópias "
+                         "de visualização")
+    ap.add_argument("--resolucao-cheia", action="store_true",
+                    help="cópias recodificadas na resolução das lentes, em vez de 3840×1920 (lento)")
     args = ap.parse_args()
 
     if args.sem_interface:
@@ -27,12 +33,16 @@ def main():
         alvo = os.path.normcase(os.path.abspath(args.saida))
         if alvo == pasta_img or alvo.startswith(pasta_img + os.sep):
             ap.error("a pasta de saída não pode ficar dentro da pasta da imagem forense")
-        return terminal(args.imagem, args.saida)
+        conv = [c.strip() for c in args.converter.split(",") if c.strip()]
+        invalidas = [c for c in conv if c not in ("mp4", "jpg", "lado_a_lado", "equiretangular")]
+        if invalidas:
+            ap.error("formato de conversão desconhecido: %s" % ", ".join(invalidas))
+        return terminal(args.imagem, args.saida, conv, 0 if args.resolucao_cheia else 3840)
     from .gui import abrir_interface
     return abrir_interface(args.imagem, args.saida, args.iniciar)
 
 
-def terminal(caminho, saida):
+def terminal(caminho, saida, converter=(), largura=3840):
     sys.stdout.reconfigure(encoding="utf-8")
     from .recuperacao import Recuperador
     from .sessao import Sessao
@@ -53,6 +63,18 @@ def terminal(caminho, saida):
     rec = Recuperador(s.img, s.vol, v, os.path.abspath(saida))
     itens = rec.executar()
     print("%d arquivo(s) em %s" % (len(itens), saida))
+    if converter:
+        from .conversao import opcoes
+        for it in list(rec.itens):
+            possiveis = {o[0] for o in opcoes(it["arquivo"], rec.ffprobe)}
+            for chave in converter:
+                if chave in possiveis:
+                    print("  convertendo %s -> %s" % (os.path.basename(it["arquivo"]), chave))
+                    try:
+                        rec.converter_arquivo(it["arquivo"], chave, largura)
+                    except Exception as e:                   # noqa: BLE001 - registrar e seguir
+                        print("    falhou: %s" % e)
+        print("%d arquivo(s) no total, com as conversões" % len(rec.itens))
 
 
 if __name__ == "__main__":

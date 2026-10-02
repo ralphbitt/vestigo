@@ -8,15 +8,21 @@ import time
 import numpy as np
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QThread, QTimer, Signal, QUrl
 from PySide6.QtGui import (QAction, QBrush, QColor, QDesktopServices, QFont, QFontMetrics,
-                           QLinearGradient, QPainter, QPen)
+                           QIcon, QLinearGradient, QPainter, QPen)
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFileDialog, QHBoxLayout, QHeaderView,
-                               QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QScrollArea,
-                               QSplitter, QTableWidget, QTableWidgetItem, QToolBar, QToolTip,
+                               QLabel, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QScrollArea,
+                               QSizePolicy, QSplitter, QTableWidget, QTableWidgetItem, QToolBar,
+                               QToolButton, QToolTip,
                                QVBoxLayout, QWidget)
 
+from . import conversao
 from .recuperacao import Recuperador, VERSAO, mmss
 from .sessao import Sessao
 from .varredura import Varredura
+
+ICONE = os.path.join(os.path.dirname(__file__), "recursos", "vestigo.ico")
+SITE = "https://github.com/ralphbitt/vestigo"
+LINKEDIN = "https://www.linkedin.com/in/rbitt"
 
 # paleta do mapa físico
 FUNDO = QColor("#1b1d22")
@@ -415,12 +421,28 @@ class Trabalho(QObject):
             self.fim.emit(None)
 
 
+class Conversor(QObject):
+    ok = Signal(dict)
+    erro = Signal(str)
+
+    def __init__(self, rec, arquivo, chave):
+        super().__init__()
+        self.rec, self.arquivo, self.chave = rec, arquivo, chave
+
+    def rodar(self):
+        try:
+            self.ok.emit(self.rec.converter_arquivo(self.arquivo, self.chave))
+        except Exception as e:                       # noqa: BLE001 - mostrar ao perito
+            self.erro.emit(str(e))
+
+
 class Janela(QMainWindow):
     def __init__(self, imagem=None, saida=None, iniciar=False):
         super().__init__()
-        self.setWindowTitle("Perícia de mídia — mapa físico e recuperação de vídeo  (v%s)" % VERSAO)
+        self.setWindowTitle("Vestigo %s — mapa físico e recuperação de vídeos e fotos" % VERSAO)
         self.resize(1500, 950)
         self.sessao, self.saida, self.thread, self.trab = None, saida, None, None
+        self.rec, self.conv_thread, self.conv = None, None, None
         self.t0 = 0
         tb = QToolBar()
         tb.setMovable(False)
@@ -433,6 +455,20 @@ class Janela(QMainWindow):
         self.a_pasta = QAction("Abrir pasta de saída", self, triggered=self.abrir_pasta)
         for a in (self.a_abrir, self.a_saida, None, self.a_ini, self.a_parar, None, self.a_png, self.a_pasta):
             tb.addSeparator() if a is None else tb.addAction(a)
+        mola = QWidget()
+        mola.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        tb.addWidget(mola)
+        ajuda = QMenu(self)
+        ajuda.addAction("Como usar (documentação)", lambda: QDesktopServices.openUrl(QUrl(SITE + "#readme")))
+        ajuda.addAction("Falar com o autor (LinkedIn)", lambda: QDesktopServices.openUrl(QUrl(LINKEDIN)))
+        ajuda.addAction("Relatar um problema", lambda: QDesktopServices.openUrl(QUrl(SITE + "/issues")))
+        ajuda.addSeparator()
+        ajuda.addAction("Sobre o Vestigo", self.sobre)
+        bt = QToolButton()
+        bt.setText("Ajuda")
+        bt.setMenu(ajuda)
+        bt.setPopupMode(QToolButton.InstantPopup)
+        tb.addWidget(bt)
         self.mapa = MapaWidget()
         rol = QScrollArea()
         rol.setWidgetResizable(True)
@@ -445,6 +481,8 @@ class Janela(QMainWindow):
         self.tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tabela.cellDoubleClicked.connect(self.abrir_video)
+        self.tabela.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tabela.customContextMenuRequested.connect(self._menu_tabela)
         self.logw = QPlainTextEdit()
         self.logw.setReadOnly(True)
         self.logw.setFont(QFont("Consolas", 9))
@@ -556,7 +594,8 @@ class Janela(QMainWindow):
             100 * v.pos / v.total, v.velocidade / 1e6, mmss(resta)))
 
     def _item(self, it):
-        self.mapa.adicionar_recuperado(it)
+        if it.get("faixas"):                             # convertidos não têm origem física própria
+            self.mapa.adicionar_recuperado(it)
         r = self.tabela.rowCount()
         self.tabela.insertRow(r)
         vals = [it["id"], os.path.relpath(it["arquivo"], self.saida), it["origem"], mmss(it.get("duracao")),
@@ -571,6 +610,7 @@ class Janela(QMainWindow):
         self.thread.wait()
         self._estado(False)
         if rec:
+            self.rec = rec
             self.mapa.cursor_real = self.mapa.cursor_vis = float(self.sessao.img.tamanho)
             png = os.path.join(self.saida, "mapa_fisico.png")
             self.mapa.grab().save(png)
@@ -581,6 +621,54 @@ class Janela(QMainWindow):
     def abrir_video(self, r, _c):
         arq = self.tabela.item(r, 1).data(Qt.UserRole)
         QDesktopServices.openUrl(QUrl.fromLocalFile(arq))
+
+    # ------------------------------------------------------------------ conversão
+    def _menu_tabela(self, pos):
+        linha = self.tabela.rowAt(pos.y())
+        if linha < 0:
+            return
+        arq = self.tabela.item(linha, 1).data(Qt.UserRole)
+        menu = QMenu(self)
+        menu.addAction("Abrir", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(arq)))
+        menu.addAction("Mostrar na pasta",
+                       lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(arq))))
+        if self.rec and not (self.conv_thread and self.conv_thread.isRunning()):
+            ops = conversao.opcoes(arq, self.rec.ffprobe)
+            if ops:
+                sub = menu.addMenu("Converter para…")
+                for chave, rotulo, _ in ops:
+                    sub.addAction(rotulo, lambda c=chave: self._converter(arq, c))
+        elif not self.rec:
+            a = menu.addAction("Converter para… (disponível ao fim da recuperação)")
+            a.setEnabled(False)
+        menu.exec(self.tabela.viewport().mapToGlobal(pos))
+
+    def _converter(self, arq, chave):
+        self.conv_thread = QThread()
+        self.conv = Conversor(self.rec, arq, chave)
+        self.conv.moveToThread(self.conv_thread)
+        self.conv_thread.started.connect(self.conv.rodar)
+        self.conv.ok.connect(self._convertido)
+        self.conv.erro.connect(self._conversao_falhou)
+        self.status.setText("Convertendo %s para %s…" % (os.path.basename(arq), chave))
+        self.log("Convertendo %s → %s" % (os.path.basename(arq), conversao.ROTULOS[chave][0]))
+        self.conv_thread.start()
+
+    def _fim_conversao(self):
+        self.conv_thread.quit()
+        self.conv_thread.wait()
+
+    def _convertido(self, it):
+        self._fim_conversao()
+        self._item(it)
+        self.status.setText("Convertido: %s" % os.path.basename(it["arquivo"]))
+        self.log("  + %s  (%s)" % (os.path.basename(it["arquivo"]), it["estado"]))
+
+    def _conversao_falhou(self, msg):
+        self._fim_conversao()
+        self.status.setText("Conversão falhou")
+        self.log("  conversão falhou: %s" % msg)
+        QMessageBox.warning(self, "Conversão", msg)
 
     def abrir_pasta(self):
         if self.saida and os.path.isdir(self.saida):
@@ -594,6 +682,16 @@ class Janela(QMainWindow):
         if c:
             self.mapa.grab().save(c)
 
+    def sobre(self):
+        QMessageBox.about(self, "Sobre o Vestigo",
+                          "<h3>Vestigo %s</h3>"
+                          "<p><i>Vestigo</i>, em latim, “sigo o rastro”. Mapa físico do dispositivo e "
+                          "recuperação forense de vídeos e fotos.</p>"
+                          "<p>Copyright © 2026 Ralph Bittencourt<br>"
+                          "Software livre sob a GNU GPL versão 3 ou posterior, <b>sem nenhuma garantia</b>.</p>"
+                          "<p><a href='%s'>Documentação e código-fonte</a> · "
+                          "<a href='%s'>Falar com o autor (LinkedIn)</a></p>" % (VERSAO, SITE, LINKEDIN))
+
     def closeEvent(self, e):
         if self.thread and self.thread.isRunning():
             self.trab.parar()
@@ -603,7 +701,13 @@ class Janela(QMainWindow):
 
 
 def abrir_interface(imagem=None, saida=None, iniciar=False):
+    if sys.platform == "win32":
+        # ícone próprio na barra de tarefas, em vez do ícone do Python
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Vestigo")
     app = QApplication.instance() or QApplication(sys.argv)
+    app.setApplicationName("Vestigo")
+    app.setWindowIcon(QIcon(ICONE))
     app.setStyle("Fusion")
     j = Janela(imagem, saida, iniciar)
     j.show()

@@ -1,4 +1,8 @@
+<p align="center"><img src="vestigo/recursos/vestigo-marca.png" alt="Vestigo — recuperação forense de vídeos e fotos" width="640"></p>
+
 # Vestigo
+
+*Vestigo*, em latim, "sigo o rastro".
 
 Ferramenta de computação forense que abre uma imagem de mídia (E01 ou dd), desenha o **mapa
 físico do dispositivo**, acompanha a varredura setor a setor com um cursor animado e **recupera
@@ -22,8 +26,8 @@ numpy, PyAV). O FFmpeg é procurado, nesta ordem, na pasta indicada pela variáv
 
 ## Uso
 
-Arraste o **primeiro arquivo da imagem** (`.E01`, `.001`, `.dd`, `.raw`) sobre
-`vestigo.bat`, ou rode:
+Arraste o **primeiro arquivo da imagem** (`.E01`, `.001`, `.dd`, `.raw`) sobre o atalho
+**Vestigo** que o `instalar.bat` cria na pasta (ou sobre `vestigo.bat`), ou rode:
 
 ```
 vestigo.bat "D:\caso\imagem.E01" --saida "D:\caso\recuperados" --iniciar
@@ -60,6 +64,24 @@ A pasta de saída nunca pode ficar dentro da pasta da evidência: o programa rec
 Apagados cujo conteúdo está todo em zeros (blocos apagados fisicamente, comum em cartões SD) ou
 cujos clusters foram reaproveitados por outro arquivo **não** são exportados como se fossem o
 arquivo: ficam listados no relatório com o motivo.
+
+## Conversão para outros formatos
+
+Na tabela, clique direito num arquivo recuperado → **Converter para…**; no terminal,
+`--converter mp4,jpg` (e `--resolucao-cheia` para as cópias recodificadas). O original nunca é
+alterado: o resultado vai para `convertidos/` e entra no relatório como **derivado**, com o
+arquivo de origem, o SHA-256 dos dois e o comando do FFmpeg.
+
+| Conversão | Como | Perda |
+|---|---|---|
+| **MP4** | troca só o recipiente (`.insv`, `.lrv`, `.mov`…), fluxos copiados | **nenhuma**: todos os pacotes idênticos ao original; metadados próprios do fabricante (giroscópio, calibração) ficam só no original |
+| **JPG** | a imagem do `.insp` cortada no fim do JPEG | **nenhuma**: imagem idêntica, sem o trailer da câmera |
+| **MP4 lado a lado** | as duas lentes de uma câmera 360° numa só imagem | recodifica: **cópia de visualização** |
+| **MP4 360° equiretangular** | as duas lentes desdobradas com o filtro `v360` do FFmpeg | recodifica e a **costura é geométrica e aproximada** (a do fabricante usa a calibração e o giroscópio de cada câmera): cópia de visualização |
+
+As cópias recodificadas saem em 3840×1920 (4K 360°, a resolução que os players esperam) e usam
+o codificador da placa de vídeo quando ele aceita a resolução, com a CPU como reserva. Para
+prova, vale sempre o original.
 
 ## Garantias
 
@@ -108,10 +130,11 @@ uma JPEG partida em dois com zeros no meio.
 .venv\Scripts\python -m unittest discover -s tests -t .
 ```
 
-Os testes geram **dados sintéticos** na hora — JPEGs codificados pelo próprio FFmpeg e uma
-imagem dd montada em memória — e conferem: hashes da varredura, recuperação byte a byte de
-fotos contíguas, recusa de foto fragmentada, trailer após o fim da imagem e SHA-256 no
-relatório. Nenhum dado real acompanha o repositório.
+Os testes geram **dados sintéticos** na hora — JPEGs e um vídeo "de duas lentes" produzidos
+pelo próprio FFmpeg, e uma imagem dd montada em memória — e conferem: hashes da varredura,
+recuperação byte a byte de fotos contíguas, recusa de foto fragmentada, trailer após o fim da
+imagem, SHA-256 no relatório, e que o remux para MP4 preserva todos os pacotes de vídeo e áudio.
+Nenhum dado real acompanha o repositório.
 
 ## Limites desta versão
 
@@ -131,6 +154,16 @@ relatório. Nenhum dado real acompanha o repositório.
 A ferramenta automatiza técnicas consolidadas da computação forense, mas **a responsabilidade
 pelo exame é de quem o assina**. Valide a versão que usar contra casos com resposta conhecida
 (ISO/IEC 27041) e registre no laudo a versão e o relatório gerado.
+
+## Ajuda
+
+- **Dúvidas, sugestões ou uso em um caso:** fale com o autor pelo
+  [LinkedIn](https://www.linkedin.com/in/rbitt).
+- **Erro ou comportamento inesperado:** abra uma
+  [issue](https://github.com/ralphbitt/vestigo/issues) com a versão, o tipo de mídia e o trecho de
+  `auditoria.jsonl` em que ocorreu. **Não anexe imagens nem arquivos de casos reais.**
+- No programa, o botão **Ajuda** (canto direito da barra) leva a esta página, ao LinkedIn e às
+  informações de versão e licença.
 
 ## Licença
 
