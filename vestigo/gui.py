@@ -208,18 +208,21 @@ class MapaWidget(QWidget):
             sub += " · " + self.sessao.aviso
         p.drawText(20, 52, sub)
         # eixo
-        passo = max(1, int(round(img.tamanho / 2 ** 30 / 14)))
+        # passo "redondo" com no máximo 14 marcas, em MiB nas mídias pequenas
+        passos = [m * 2 ** 20 * e for e in (1, 2 ** 10, 2 ** 20) for m in (1, 2, 5, 10, 20, 50, 100, 200, 500)]
+        passo = next((s for s in passos if img.tamanho / s <= 14), passos[-1])
+        unid, div = ("GiB", 2 ** 30) if passo >= 2 ** 30 else ("MiB", 2 ** 20)
         y0, y1 = TOPO_H - 8, self.height() - 60
         f8 = QFont("Segoe UI", 8)
         p.setFont(f8)
-        k = 0
-        while k * 2 ** 30 <= img.tamanho:
-            x = self._x(k * 2 ** 30)
+        pos = 0
+        while pos <= img.tamanho:
+            x = self._x(pos)
             p.setPen(QPen(GRADE, 1))
             p.drawLine(QPointF(x, y0), QPointF(x, y1))
             p.setPen(TEXTO2)
-            p.drawText(QRectF(x - 40, 62, 80, 14), Qt.AlignCenter, "%d GiB" % k)
-            k += passo
+            p.drawText(QRectF(x - 40, 62, 80, 14), Qt.AlignCenter, "%d %s" % (pos // div, unid))
+            pos += passo
         y = TOPO_H
         for nome, linhas in self._linhas():
             p.setPen(GRUPO)

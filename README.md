@@ -12,6 +12,38 @@ auditoria.
 Pensada para perícia: somente leitura sobre a evidência, conferência dos hashes da aquisição,
 e cada arquivo gerado com sua origem física (bytes e clusters) e SHA-256.
 
+## Telas
+
+<p align="center"><img src="docs/capturas/varredura.gif" alt="Varredura de um cartão de memória com o cursor percorrendo o mapa físico" width="900"></p>
+
+O cursor percorre a mídia do primeiro ao último setor; atrás dele, a faixa "conteúdo lido" mostra
+o que há em cada trecho, e os arquivos recuperados entram no mapa e na tabela.
+
+**Mapa físico ao fim da recuperação** — vivos (verde), apagados com a cadeia da FAT (tracejado),
+espaço livre, o que a leitura encontrou e o material recuperado, cada um na sua posição física:
+
+<p align="center"><img src="docs/capturas/mapa_fisico.png" alt="Mapa físico ao fim da recuperação" width="900"></p>
+
+<details>
+<summary>Janela completa: durante a varredura e ao fim</summary>
+
+![Durante a varredura](docs/capturas/varredura.png)
+
+![Recuperação concluída](docs/capturas/concluido.png)
+
+</details>
+
+As telas são de um **cartão exFAT sintético** de 256 MiB, gerado por `ferramentas/demo.py` com
+vídeos e fotos produzidos na hora pelo FFmpeg — nenhum dado real. Nele há um vídeo apagado e
+fragmentado (recuperado inteiro pela cadeia da FAT), um apagado com o conteúdo zerado e outro
+sobrescrito por fotos novas (os dois listados como não recuperados, com o motivo; o trecho final do
+sobrescrito volta pela busca de fluxos), além de um MP4 e uma foto fora do sistema de arquivos
+(carving) e uma gravação interrompida sem índice. Para gerar o mesmo cartão:
+
+```
+.venv\Scripts\python -m ferramentas.demo D:\demo
+```
+
 ## Instalação
 
 Requer **Python 3.13** e **FFmpeg**.
@@ -133,7 +165,9 @@ uma JPEG partida em dois com zeros no meio.
 Os testes geram **dados sintéticos** na hora — JPEGs e um vídeo "de duas lentes" produzidos
 pelo próprio FFmpeg, e uma imagem dd montada em memória — e conferem: hashes da varredura,
 recuperação byte a byte de fotos contíguas, recusa de foto fragmentada, trailer após o fim da
-imagem, SHA-256 no relatório, e que o remux para MP4 preserva todos os pacotes de vídeo e áudio.
+imagem, SHA-256 no relatório, leitura de um exFAT sintético (foto viva, apagada e fragmentada
+recuperada byte a byte pela cadeia da FAT, apagada zerada recusada com o motivo) e que o remux
+para MP4 preserva todos os pacotes de vídeo e áudio.
 Nenhum dado real acompanha o repositório.
 
 ## Limites desta versão
